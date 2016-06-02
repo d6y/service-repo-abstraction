@@ -122,7 +122,6 @@ object Example {
 
       // We can work across repositories....
       val action = for {
-        _        <- Repositories.init()
         person   <- people.findOrCreate(name)
         rowCount <- places.moveIntoAddress(person, address)
       } yield rowCount
@@ -140,14 +139,19 @@ object Example {
     import scala.concurrent.Await
     import scala.concurrent.duration._
 
+    // Initialize the database
+    Await.result(Repositories.init().run, 5 seconds)
+
     val service = new PretendService(
       new Repositories.PersonRepo(),
       new Repositories.AddressRepo()
     )
 
+    // Run a service endpoint:
     val insertResult = Await.result(service.occupy("Mrs Hudson", "221B Baker Street"), 5 seconds)
     println(s"Running insert service produces: $insertResult")
 
+    // Run another service endpoint:
     import scala.concurrent.ExecutionContext.Implicits.global
     service.everywhere().foreach(println)
   }
