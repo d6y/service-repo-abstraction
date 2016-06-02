@@ -10,8 +10,9 @@ import scala.concurrent.Future
 
 object Example {
 
+  //
   // We can compose around this abstraction on an action:
-
+  //
   case class RepoAction[+T](private val action: slick.dbio.DBIO[T]) {
 
     // Inside we can work in terms of Slick
@@ -38,7 +39,9 @@ object Example {
   }
 
 
+  //
   // Example entities as a demonstration...
+  //
   case class PersonPK(value: Long)
   final case class Person(name: String, id: PersonPK = PersonPK(0L))
   final case class Address(street: String, occupier: Option[PersonPK] = None)
@@ -74,19 +77,30 @@ object Example {
     }
 
     // An automatic converstion from DBIO to RepoAction
+    // This will allow us to express that our service endponts return RepoActions
+    // but use standard Slick DBIO actions in our endpoint implementation
     implicit def intoRepoAction[T](dbio: DBIO[T]): RepoAction[T] =
       RepoAction(dbio)
 
+    //
     // Example repositories, that use Slick, but produce our own RepoAction results
+    //
 
+    // For a Person we can try to...
+    //  - find them
+    //  - create one
+    //  - find or create if not found
     class PersonRepo {
 
       import scala.concurrent.ExecutionContext.Implicits.global
 
+      def find(name: String): RepoAction[Option[Person]] =
+        people.filter(_.name === name).result.headOption
+
       def create(name: String): RepoAction[Person] = {
         // H2 doesn't support "table returning table"...
         //  people returning people += Person(name)
-        // so we simulate it...
+        // ...so we simulate it:
         val insPerson = people returning people.map(_.id) into { (person, id) =>
           person.copy(id = id)
         }
@@ -94,15 +108,17 @@ object Example {
         insPerson += Person(name)
       }
 
-      def find(name: String): RepoAction[Option[Person]] =
-        people.filter(_.name === name).result.headOption
-
       def findOrCreate(name: String): RepoAction[Person] =
         find(name).flatMap {
           case Some(p) => RepoAction.successful(p)
           case None    => create(name)
-    }}
+        }
+    }
 
+
+    // Address repo supports:
+    // - storing an address with a person living there
+    // - listing all the addresses
     class AddressRepo {
 
       def moveIntoAddress(p: Person, street: String): RepoAction[Int] =
@@ -113,19 +129,25 @@ object Example {
     }
   }
 
+  //
+  // Example Service that uses multiple repositores in a single transaction
+  //
+
   // Inside a service we talk in terms of Repositories only. No Slick details here...
+  // The service endpoints (occupy and everywhere) return Futures
   case class PretendService(people: Repositories.PersonRepo, places: Repositories.AddressRepo) {
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
     def occupy(name: String, address: String): Future[Int] = {
 
-      // We can work across repositories....
+      // We can work across repositories:
       val action = for {
         person   <- people.findOrCreate(name)
         rowCount <- places.moveIntoAddress(person, address)
       } yield rowCount
 
+      // ...and run as a transction into a Future:
       action.runTransactionally()
     }
 
@@ -133,13 +155,13 @@ object Example {
       places.all.run()
   }
 
-  // Putting it all together...
+  // Example of running a service
   def main(args: Array[String]): Unit = {
 
     import scala.concurrent.Await
     import scala.concurrent.duration._
 
-    // Initialize the database
+    // Initialize the H2 database
     Await.result(Repositories.init().run, 5 seconds)
 
     val service = new PretendService(
