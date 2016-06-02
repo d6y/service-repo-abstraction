@@ -80,7 +80,7 @@ object Example {
     // Example repositories, that use Slick, but produce our own RepoAction results
 
     class PersonRepo {
-     
+
       import scala.concurrent.ExecutionContext.Implicits.global
 
       def create(name: String): RepoAction[Person] = {
@@ -98,7 +98,7 @@ object Example {
         people.filter(_.name === name).result.headOption
 
       def findOrCreate(name: String): RepoAction[Person] =
-        find(name).flatMap { 
+        find(name).flatMap {
           case Some(p) => RepoAction.successful(p)
           case None    => create(name)
     }}
