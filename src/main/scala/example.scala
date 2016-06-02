@@ -33,6 +33,11 @@ object Example {
       RepoAction(action map f)
   }
 
+  object RepoAction {
+    def successful[T](v: T) = RepoAction(slick.dbio.DBIO.successful(v))
+  }
+
+
   // Example entities as a demonstration...
   case class PersonPK(value: Long)
   final case class Person(name: String, id: PersonPK = PersonPK(0L))
@@ -75,9 +80,28 @@ object Example {
     // Example repositories, that use Slick, but produce our own RepoAction results
 
     class PersonRepo {
+     
+      import scala.concurrent.ExecutionContext.Implicits.global
+
+      def create(name: String): RepoAction[Person] = {
+        // H2 doesn't support "table returning table"...
+        //  people returning people += Person(name)
+        // so we simulate it...
+        val insPerson = people returning people.map(_.id) into { (person, id) =>
+          person.copy(id = id)
+        }
+
+        insPerson += Person(name)
+      }
+
       def find(name: String): RepoAction[Option[Person]] =
         people.filter(_.name === name).result.headOption
-    }
+
+      def findOrCreate(name: String): RepoAction[Person] =
+        find(name).flatMap { 
+          case Some(p) => RepoAction.successful(p)
+          case None    => create(name)
+    }}
 
     class AddressRepo {
 
@@ -99,8 +123,8 @@ object Example {
       // We can work across repositories....
       val action = for {
         _        <- Repositories.init()
-        person   <- people.find(name)
-        rowCount <- places.moveIntoAddress(person getOrElse Person("Nobody"), address)
+        person   <- people.findOrCreate(name)
+        rowCount <- places.moveIntoAddress(person, address)
       } yield rowCount
 
       action.runTransactionally()
